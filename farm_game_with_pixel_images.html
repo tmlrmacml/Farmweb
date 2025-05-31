@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>나의 농장 게임</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 20px;
+            background-color: #f0f0f0;
+        }
+        #gameContainer {
+            border: 2px solid #333;
+            padding: 10px;
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        #farmGrid {
+            display: grid;
+            grid-template-columns: repeat(5, 48px); /* 5x5 격자, 각 칸 48px */
+            grid-template-rows: repeat(5, 48px);   /* 각 칸 48px */
+            gap: 4px; /* 칸 사이 간격 조정 */
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+        }
+        .plot {
+            width: 48px;  /* 칸 너비 48px */
+            height: 48px; /* 칸 높이 48px */
+            background-color: #9b7653;
+            border: 1px solid #7a5c43;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            overflow: hidden;
+        }
+        .plot img {
+            width: 100%; /* 이미지가 칸을 채우도록 */
+            height: 100%;/* 이미지가 칸을 채우도록 */
+            object-fit: cover; /* 이미지 비율 유지하며 칸 채움 */
+            image-rendering: pixelated; /* 픽셀 아트 선명하게 보이도록 (Chrome, Edge, Opera) */
+            image-rendering: -moz-crisp-edges; /* Firefox */
+            image-rendering: crisp-edges; /* 일부 구형 브라우저 및 Safari */
+        }
+        #controls {
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 0 5px;
+            cursor: pointer;
+            border: none;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 3px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button.selected {
+            background-color: #ff9800;
+        }
+        #infoPanel {
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>나의 작은 농장</h1>
+    <div id="gameContainer">
+        <div id="infoPanel">
+            돈: <span id="money">100</span>
+        </div>
+        <div id="controls">
+            <button id="plantButton">씨앗 심기 (비용: 10)</button>
+            <button id="harvestButton">수확하기 (수익: 25)</button>
+        </div>
+        <div id="farmGrid">
+            <!-- 농장 격자는 JavaScript로 생성됩니다 -->
+        </div>
+        <div id="messageArea" style="margin-top: 10px; text-align: center; min-height: 20px;"></div>
+    </div>
+
+    <script>
+        const farmGridElement = document.getElementById('farmGrid');
+        const moneyElement = document.getElementById('money');
+        const plantButton = document.getElementById('plantButton');
+        const harvestButton = document.getElementById('harvestButton');
+        const messageArea = document.getElementById('messageArea');
+
+        const GRID_SIZE = 5;
+        const PLOT_COUNT = GRID_SIZE * GRID_SIZE;
+        const SEED_COST = 10;
+        const HARVEST_YIELD = 25;
+        const GROWTH_INTERVAL = 3000; // 각 성장 단계까지 3초
+
+        let currentMoney = 100;
+        let currentTool = null; // 'plant' 또는 'harvest'
+        let farmPlots = [];
+
+        // 플롯 상태: 0: 빈 땅, 1: 씨앗, 2: 성장중, 3: 수확가능
+
+        function initializeGame() {
+            farmPlots = new Array(PLOT_COUNT).fill(0).map(() => ({
+                state: 0,
+                plantedTime: null
+            }));
+            renderFarmGrid();
+            updateMoneyDisplay();
+            plantButton.addEventListener('click', () => selectTool('plant'));
+            harvestButton.addEventListener('click', () => selectTool('harvest'));
+            setInterval(updateGrowthAllPlots, 1000);
+        }
+
+        function renderFarmGrid() {
+            farmGridElement.innerHTML = '';
+            for (let i = 0; i < PLOT_COUNT; i++) {
+                const plotElement = document.createElement('div');
+                plotElement.classList.add('plot');
+                plotElement.dataset.index = i;
+
+                const plotData = farmPlots[i];
+                const imgElement = document.createElement('img');
+
+                switch (plotData.state) {
+                    case 1: // 씨앗
+                        imgElement.src = 'templates/plant.png';
+                        imgElement.alt = '씨앗';
+                        break;
+                    case 2: // 성장중
+                        imgElement.src = 'templates/growing.png';
+                        imgElement.alt = '성장중';
+                        break;
+                    case 3: // 수확 가능
+                        imgElement.src = 'templates/canharvest.png';
+                        imgElement.alt = '수확 가능';
+                        break;
+                    default: // 0: 빈 땅
+                        imgElement.src = 'templates/blank.png';
+                        imgElement.alt = '빈 땅';
+                        break;
+                }
+                plotElement.appendChild(imgElement);
+                plotElement.addEventListener('click', () => onPlotClick(i));
+                farmGridElement.appendChild(plotElement);
+            }
+        }
+
+        function selectTool(tool) {
+            currentTool = tool;
+            plantButton.classList.remove('selected');
+            harvestButton.classList.remove('selected');
+            if (tool === 'plant') {
+                plantButton.classList.add('selected');
+                displayMessage('씨앗을 심을 땅을 선택하세요.');
+            } else if (tool === 'harvest') {
+                harvestButton.classList.add('selected');
+                displayMessage('수확할 작물이 있는 땅을 선택하세요.');
+            }
+        }
+
+        function onPlotClick(index) {
+            if (currentTool === null) {
+                displayMessage('먼저 도구(씨앗 심기 또는 수확하기)를 선택하세요.');
+                return;
+            }
+
+            const plotData = farmPlots[index];
+
+            if (currentTool === 'plant') {
+                if (plotData.state === 0) {
+                    if (currentMoney >= SEED_COST) {
+                        currentMoney -= SEED_COST;
+                        plotData.state = 1;
+                        plotData.plantedTime = Date.now();
+                        displayMessage('씨앗을 심었습니다!');
+                    } else {
+                        displayMessage('돈이 부족합니다!');
+                    }
+                } else {
+                    displayMessage('이미 작물이 있거나 씨앗이 심겨진 땅입니다.');
+                }
+            } else if (currentTool === 'harvest') {
+                if (plotData.state === 3) {
+                    currentMoney += HARVEST_YIELD;
+                    plotData.state = 0;
+                    plotData.plantedTime = null;
+                    displayMessage('작물을 수확했습니다! (+' + HARVEST_YIELD + ')');
+                } else if (plotData.state === 0) {
+                    displayMessage('빈 땅입니다. 수확할 작물이 없습니다.');
+                }
+                else {
+                    displayMessage('아직 수확할 수 없습니다.');
+                }
+            }
+            updateMoneyDisplay();
+            renderFarmGrid();
+        }
+
+        function updateGrowthAllPlots() {
+            let needsRender = false;
+            for (let i = 0; i < farmPlots.length; i++) {
+                const plot = farmPlots[i];
+                if (plot.state > 0 && plot.state < 3 && plot.plantedTime) {
+                    const timeSincePlanted = Date.now() - plot.plantedTime;
+
+                    if (plot.state === 1 && timeSincePlanted >= GROWTH_INTERVAL) {
+                        plot.state = 2;
+                        plot.plantedTime = Date.now();
+                        needsRender = true;
+                    } else if (plot.state === 2 && timeSincePlanted >= GROWTH_INTERVAL) {
+                        plot.state = 3;
+                        needsRender = true;
+                    }
+                }
+            }
+            if (needsRender) {
+                renderFarmGrid();
+            }
+        }
+
+        function updateMoneyDisplay() {
+            moneyElement.textContent = currentMoney;
+        }
+
+        function displayMessage(msg) {
+            messageArea.textContent = msg;
+            setTimeout(() => {
+                if (messageArea.textContent === msg) {
+                    messageArea.textContent = '';
+                }
+            }, 3000);
+        }
+
+        initializeGame();
+    </script>
+</body>
+</html>
